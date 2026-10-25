@@ -1,0 +1,3 @@
+JT49 FPGA Clone of YM2149 hardware by Jose Tejada (@topapate)
+https://github.com/jotego/jt49
+Under GNU GPL-3.0 license.
