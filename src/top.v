@@ -5,19 +5,24 @@
 `timescale 1ns / 1ps
 
 module top (
-        input wire	      clk_50,
-        input wire	      reset_n,
+        input wire       clk_50,
+        input wire       reset_n,
 
         output wire [4:0] vga_r,
         output wire [5:0] vga_g,
         output wire [4:0] vga_b,
-        output wire	      vga_hs,
-        output wire	      vga_vs,
+        output wire	  vga_hs,
+        output wire	  vga_vs,
 
-        inout	      usbdm,
-        inout	      usbdp,
-        output [7:0]      seg_data,
-        output [5:0]      scan_sig
+        inout		  usbdm,
+        inout		  usbdp,
+
+        output wire       i2s_bck,
+        output wire       i2s_lrck,
+        output wire       i2s_din,
+
+        output [7:0]	  seg_data,
+        output [5:0]	  scan_sig
     );
 
     localparam [2:0]	      VRAM = 3'b000;
@@ -41,6 +46,7 @@ module top (
     wire			      clk_25;
     wire			      clk_cpu;
     wire			      clk_vdg;
+    wire			      clk_psg;
     wire			      clk_usb;
     wire			      clk_seg;
     wire			      pll_locked;
@@ -72,7 +78,7 @@ module top (
     wire			      io_wr;
     wire [7:0]		      io_byte, io_dev_byte;
     wire			      vram_rd;
-    wire [7:0]		      psg_dout = 8'h00;
+    wire [7:0]	                      psg_dout;
     wire [7:0]		      smode_dout = 8'h00;
 
     // Local regs/wire for interrupt signal generation
@@ -135,6 +141,15 @@ module top (
     wire[79:0] key_port;
     wire [3:0] kbd_port_n;
     wire [7:0] kbd_data;
+
+    // PSG
+    wire	       ay_bdir;
+    wire	       ay_bc1;
+    wire [7:0]         ay_din, ay_dout;
+    wire [9:0]	       ay_sout;
+    reg [3:0]	       clk_psg_div;
+    wire	       clk_psg_en;
+    wire	       psg_en;
 
     // Segment display
     wire [23:0] seg_num = {key2[3:0], key2[7:4], key1[3:0], key1[7:4], modifiers[3:0], modifiers[7:4]};
@@ -266,7 +281,38 @@ module top (
                   .Scan_Sig( scan_sig )
                                        );
 
-    // Aux clock for VDG
+    jt49_bus psg (
+        .rst_n(reset_n),
+        .clk(clk_psg),
+        .clk_en(clk_psg_en),
+        .bdir(ay_bdir),
+        .bc1(ay_bc1),
+        .din(ay_din),
+        .sel(1'b1),
+        .dout(ay_dout),
+        .sound(ay_sout),
+        .A(),
+        .B(),
+        .C(),
+        .sample(),
+        .IOA_in(8'h00),
+        .IOA_out(),
+        .IOA_oe(),
+        .IOB_in(8'h00),
+        .IOB_out(),
+        .IOB_oe()
+    );
+
+    i2s i2s_inst(
+        .clk(clk_25),
+        .clk_en(clk_psg_en),
+        .rst_n(reset_n),
+        .din(ay_sout),
+        .i2s_bclk(i2s_bck),
+        .i2s_lrclk(i2s_lrck),
+        .i2s_sdata(i2s_din));
+
+    // Clock enable VDG when CVBS out is enabled.
     always @(posedge clk_vdg)
     begin
         clk_vdg_en <= !clk_vdg_en;
@@ -305,9 +351,16 @@ module top (
     end
     assign gmode_en = io_en && io_dev == GMODE;
 
+    always @(posedge clk_psg or negedge reset_n) begin
+        if (!reset_n) clk_psg_div <= 4'd0;
+        else        clk_psg_div <= clk_psg_div + 1'b1;
+    end
+    assign clk_psg_en = (clk_psg_div == 4'd15); // 25MHz / 16 ~= 1.56MHz
+
     // Clock definitions
     assign clk_seg = clk_25;
     assign clk_vdg = clk_25;
+    assign clk_psg = clk_25;
 
     // Main memory/IO decoding
     assign cpu_wr = ~cpu_wr_n;
@@ -396,6 +449,16 @@ module top (
     assign vga_g = {mc_g, 2'b11};
     assign vga_b = {mc_b, 1'b1};
 
+    assign psg_en = io_en && io_dev == PSG;
+
+    // The schematic wires A0 to BC2, but jt49_bus does not have BC2 (always 1).
+    // The chip allows an alternative wiring using redundant pin combinations
+    // for INACTIVE state.
+    assign ay_din = psg_en ? cpu_data : 8'bz;
+    assign ay_bdir = psg_en ? io_wr | ~cpu_addr[0] : 8'b0;
+    assign ay_bc1 = psg_en ? io_rd | ~cpu_addr[0] : 8'b0;
+    assign psg_dout = psg_en && io_rd ? ay_dout : 8'bz;
+
     // Keyboard ports are 8000H ~ 8009H
     assign kbd_port_n = cpu_addr[3:0];
     assign kbd_data = kbd_port_n == 4'd0 ? key_port[7:0] :
@@ -408,4 +471,65 @@ module top (
            kbd_port_n == 4'd7 ? key_port[63:56] :
            kbd_port_n == 4'd8 ? key_port[71:64] :
            kbd_port_n == 4'd9 ? key_port[79:72] : 8'bz;
+endmodule
+
+module i2s(
+	   input wire	    clk,
+	   input wire       clk_en,
+	   input wire	    rst_n,
+	   input wire [9:0] din,
+	   output wire	    i2s_bclk,
+	   output wire	    i2s_lrclk,
+	   output wire	    i2s_sdata);
+
+    // Expand 10 to 16 bit
+    wire [15:0] payload = { (din - 10'b1000000000), 6'h00 };
+    reg [15:0] shift_reg;
+    reg        sdata_out;
+
+    reg bclk_reg;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) bclk_reg <= 1'b0;
+        else if (clk_en) bclk_reg <= ~bclk_reg;
+    end
+    assign i2s_bclk = bclk_reg;
+
+    reg bclk_reg_delayed;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) bclk_reg_delayed <= 1'b0;
+        else        bclk_reg_delayed <= bclk_reg;
+    end
+    wire bclk_rising = (bclk_reg && !bclk_reg_delayed);
+
+    reg [4:0] bit_cnt;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            bit_cnt <= 5'd0;
+        end else if (bclk_rising) begin
+            bit_cnt <= bit_cnt + 1'b1;
+        end
+    end
+    assign i2s_lrclk = bit_cnt[4];
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            shift_reg <= 16'd0;
+            sdata_out <= 1'b0;
+        end else if (bclk_rising) begin
+            if (bit_cnt == 5'd0 || bit_cnt == 5'd16) begin
+                shift_reg <= payload;
+            end else begin
+                shift_reg <= {shift_reg[14:0], 1'b0};
+            end
+
+            if ((bit_cnt >= 5'd0 && bit_cnt <= 5'd15) || (bit_cnt >= 5'd16 && bit_cnt <= 5'd31)) begin
+                sdata_out <= shift_reg[15];
+            end else begin
+                sdata_out <= 1'b0;
+            end
+        end
+    end
+
+    assign i2s_sdata = sdata_out;
+
 endmodule
