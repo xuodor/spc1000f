@@ -346,7 +346,7 @@ module top (
     begin
         if (io_wr && gmode_en)
         begin
-            gmode <= cpu_data[4:0];
+            gmode <= cpu_data[5:1];
         end
     end
     assign gmode_en = io_en && io_dev == GMODE;
