@@ -18,7 +18,23 @@ SPC-1000F is a near-complete FPGA implementation of [SPC-1000](https://en.wikipe
  * If you want to build it from source, unzip the archive(xilinx.zip), import the project, and follow [the instruction](https://dejazzer.com/ee478/labs/lab2_ise_tutorial.pdf) (from section 3.4 "Add Existing Source Files to Project").
 
 ## Connecting a keyboard
-   The board does not come with USB or PS/2 connector. I chose to use a simple USB A female receptacle + 15K resistors x 2 as instructed in [usb-hid-host](https://github.com/nand2mario/usb_hid_host/blob/main/doc/usb_hid_host.md) project.
+   The board does not come with USB or PS/2 connector. I chose to use a simple [USB 2.0 A female receptacle](https://www.google.com/search?q=USB+A+female+receptacle) + 15K resistors x 2 as instructed in [usb-hid-host](https://github.com/nand2mario/usb_hid_host/blob/main/doc/usb_hid_host.md) project.
+```
++---------+
+|         |           +-----+           +----------------+
+|         +----+------+     |           |                |
+|  FPGA   |    |      | USB +-----------+    Keyboard    |
+|  board  +----|---+--+ con.|           |                |
+|         |    |   |  +-----+           +----------------+
++---------+    8   8
+               |   |  15K
+              /// ///
+```
+(VCC,GND pins are not shown here for brevity's sake but they need wiring too)
+
+## Connecting a sound chip
+
+A [DAC breakout board](https://www.google.com/search?q=I2s++dac+module)(PCM5012 or MAX93857, to name a few) via I2S protocol (`bclk/lrclk/din`) works.
 
 ## TODO
  * Fix bugs (plenty of them alive...)
