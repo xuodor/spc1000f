@@ -151,6 +151,10 @@ module top (
     wire	       clk_psg_en;
     wire	       psg_en;
 
+    // IPL
+    // Reading from 32K ROM + Writing to 64K RAM upon start.
+    reg                 iplk = 1'b0;
+
     // Segment display
     wire [23:0] seg_num = {key2[3:0], key2[7:4], key1[3:0], key1[7:4], modifiers[3:0], modifiers[7:4]};
 
@@ -180,11 +184,14 @@ module top (
                          .nNMI(1'b1),
                          .nRESET(~reset_cpu));
 
-    sync_ram #(.MEM_INIT_FILE("main.mem"))
-             mem(
+    // Access RAM for both as we do not have ROM for now -
+    // just use 15 bits of the address when reading from ROM.
+    wire [15:0] mem_addr = iplk | mem_wr ? ram_addr : {1'b0, ram_addr[14:0]};
+
+    sync_ram mem(
                  .clk(clk_cpu),
                  .we(mem_wr),
-                 .addr(ram_addr),
+                 .addr(mem_addr),
                  .din(ram_din),
                  .dout(ram_byte));
 
@@ -356,6 +363,11 @@ module top (
         else        clk_psg_div <= clk_psg_div + 1'b1;
     end
     assign clk_psg_en = (clk_psg_div == 4'd15); // 25MHz / 16 ~= 1.56MHz
+
+    always @(posedge clk_cpu or negedge reset_n) begin
+       if (!reset_n) iplk <= 1'b0;
+       else if (io_dev == IPL) iplk <= 1'b1;
+    end
 
     // Clock definitions
     assign clk_seg = clk_25;
