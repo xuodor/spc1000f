@@ -354,6 +354,7 @@ module top (
                         .addr_a(vc_addr_tg),
                         .din_a(vc_din_tg),
                         .dout_a(vc_dout_tg),
+                        .clk_b(clk_vdg),
                         .addr_b(vg_addr_tg),
                         .dout_b(vg_data_tg));
 
@@ -362,6 +363,7 @@ module top (
                         .addr_a(vc_addr_ag),
                         .din_a(vc_din_ag),
                         .dout_a(vc_dout_ag),
+                        .clk_b(clk_vdg),
                         .addr_b(vg_addr_ag),
                         .dout_b(vg_data_ag));
 
@@ -370,6 +372,7 @@ module top (
                         .addr_a(vc_addr_cg),
                         .din_a(vc_din_cg),
                         .dout_a(vc_dout_cg),
+                        .clk_b(clk_vdg),
                         .addr_b(vg_addr_cg),
                         .dout_b(vg_data_cg));
 

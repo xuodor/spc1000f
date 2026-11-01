@@ -30,21 +30,26 @@ module vram (
                 input            we_a,
                 input [10:0]     addr_a,
                 input [7:0]      din_a,
-                output [7:0]     dout_a,
+                output reg [7:0] dout_a,
                 // Port B (VDG)
+                input            clk_b,
                 input [10:0]     addr_b,
-                output [7:0]     dout_b
+                output reg [7:0] dout_b
             );
 
-   reg [7:0]                     ram [0:2047];
+   (* ram_style = "block" *) reg [7:0] ram [0:2047];
 
    always @(posedge clk_a)
      begin
-        if (we_a)
+        if (we_a) begin
           ram[addr_a] <= din_a;
+        end
+        dout_a <= ram[addr_a];
      end
 
-   assign dout_a = !we_a ? ram[addr_a] : 8'bz;
-   assign dout_b = addr_a == addr_b ? din_a : ram[addr_b];
+   always @(posedge clk_a)
+     begin
+         dout_b <= ram[addr_b];
+     end
 
 endmodule
