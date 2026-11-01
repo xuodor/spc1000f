@@ -21,6 +21,17 @@ module top (
         output wire       i2s_lrck,
         output wire       i2s_din,
 
+        output                       sdram_clk,
+        output                       sdram_cke,
+        output                       sdram_cs_n,
+        output                       sdram_we_n,
+        output                       sdram_cas_n,
+        output                       sdram_ras_n,
+        output[1:0]                  sdram_dqm,
+        output[1:0]                  sdram_ba,
+        output[12:0]                 sdram_addr,
+        inout[15:0]                  sdram_dq,
+
         output [7:0]	  seg_data,
         output [5:0]	  scan_sig
     );
@@ -42,6 +53,11 @@ module top (
     localparam [1:0]	      AG = 2'b01;
     localparam [1:0]	      CG = 2'b10;
 
+    localparam MEM_DATA_BITS          = 8;
+    localparam ADDR_BITS              = 16;
+    localparam BURST_BITS             = 8;
+    localparam BURST_SIZE             = 1;
+
     // Clocks
     wire			      clk_25;
     wire			      clk_cpu;
@@ -49,7 +65,9 @@ module top (
     wire			      clk_psg;
     wire			      clk_usb;
     wire			      clk_seg;
+    wire			      clk_sdram90p;
     wire			      pll_locked;
+    reg                               sdram_ready = 1'b0;
 
     // CPU signals
     wire [15:0]		      cpu_addr;
@@ -58,10 +76,12 @@ module top (
     wire			      refresh_n;
     wire			      int_n;
     wire			      reset = ~reset_n;
-    wire			      reset_cpu = reset | ~pll_locked;
+    wire			      reset_cpu = reset | ~pll_locked | ~sdram_ready;
     wire			      reset_vdg = reset_cpu;
 
     wire			      mem_rd;
+    wire                              ram_rd;
+    wire                              rom_en;
     wire			      mem_wr;
     wire			      mem_en, mem_en_n;
     wire			      cpu_wr, cpu_wr_n;
@@ -69,8 +89,25 @@ module top (
 
     // Main memory
     wire [15:0]		      ram_addr;
+    wire [14:0]		      rom_addr;
+
+    wire [7:0]		      mem_byte;
     wire [7:0]		      ram_byte;
+    wire [7:0]		      rom_byte;
     wire [7:0]		      ram_din;
+
+    wire                             wr_burst_data_req;
+    wire                             wr_burst_finish;
+    wire                             rd_burst_finish;
+    wire                             rd_burst_req;
+    wire                             wr_burst_req;
+    wire[BURST_BITS - 1:0]           rd_burst_len;
+    wire[BURST_BITS - 1:0]           wr_burst_len;
+    wire[ADDR_BITS - 1:0]            rd_burst_addr;
+    wire[ADDR_BITS - 1:0]            wr_burst_addr;
+    wire                             rd_burst_data_valid;
+    wire[MEM_DATA_BITS - 1 : 0]      rd_burst_data;
+    wire[MEM_DATA_BITS - 1 : 0]      wr_burst_data;
 
     // IO decoding logic signals
     wire			      io_en;
@@ -157,15 +194,33 @@ module top (
 
     // Segment display
     wire [23:0] seg_num = {key2[3:0], key2[7:4], key1[3:0], key1[7:4], modifiers[3:0], modifiers[7:4]};
-
+    wire clk_100;
     clocks clock_inst(
                .clk_in(clk_50),
                .clk_25(clk_25),
                .clk_12(clk_usb),
                .clk_4(clk_cpu),
+               .clk_100(clk_100),
+               .clk_100p(clk_sdram90p),
                .RESET(reset),
                .LOCKED(pll_locked)
            );
+
+    // ODDR2 Clock Forwarding Instance
+    ODDR2 #(
+        .DDR_ALIGNMENT("NONE"), // Sets output alignment to "NONE", "C0" or "C1"
+        .INIT(1'b0),            // Sets initial state of the Q output to 1'b0 or 1'b1
+        .SRTYPE("SYNC")         // Specifies "SYNC" or "ASYNC" set/reset
+    ) sdram_clk_forward_inst (
+        .Q(sdram_clk),     // Output clock net connected directly to your top-level port
+        .C0(clk_100),   // Your internal clock net (output from clkout4_buf)
+        .C1(~clk_100),  // Inverted internal clock net using local inversion
+        .CE(1'b1),              // Clock enable tied high
+        .D0(1'b1),              // Data 0 tied to Logic 1
+        .D1(1'b0),              // Data 1 tied to Logic 0
+        .R(1'b0),               // Reset tied low
+        .S(1'b0)                // Set tied low
+    );
     z80_top_direct_n cpu(
                          .nMREQ(mem_en_n),
                          .nIORQ(io_en_n),
@@ -184,16 +239,74 @@ module top (
                          .nNMI(1'b1),
                          .nRESET(~reset_cpu));
 
-    // Access RAM for both as we do not have ROM for now -
-    // just use 15 bits of the address when reading from ROM.
-    wire [15:0] mem_addr = iplk | mem_wr ? ram_addr : {1'b0, ram_addr[14:0]};
+    wire [15:0] mem_addr = iplk | mem_wr ? ram_addr : {1'b0, rom_addr};
 
-    sync_ram mem(
-                 .clk(clk_cpu),
-                 .we(mem_wr),
-                 .addr(mem_addr),
-                 .din(ram_din),
-                 .dout(ram_byte));
+    // Repurpose r/w memory as read-only one in order to utilize BRAM. Write
+    // operation is ignored.
+    sync_ram rom(.clk(clk_cpu),
+                  .we(1'b0),
+                  .addr(rom_addr),
+                  .din(),
+                  .dout(rom_byte));
+
+    sdram
+      #(
+	.MEM_DATA_BITS             (MEM_DATA_BITS),
+	.ADDR_BITS                 (ADDR_BITS    ),
+	.BURST_BITS                (BURST_BITS   ),
+	.BURST_SIZE                (BURST_SIZE   )
+        )
+    sdram_inst
+      (
+       .rst                       (reset                   ),
+       .mem_clk                   (clk_sdram90p            ),
+
+       .wr(mem_wr),
+       .rd(ram_rd),
+       .addr(mem_addr),
+       .din(ram_din),
+       .dout(ram_byte),
+
+       .rd_burst_req              (rd_burst_req             ),
+       .wr_burst_req              (wr_burst_req             ),
+       .rd_burst_len              (rd_burst_len             ),
+       .wr_burst_len              (wr_burst_len             ),
+       .rd_burst_addr             (rd_burst_addr            ),
+       .wr_burst_addr             (wr_burst_addr            ),
+       .rd_burst_data_valid       (rd_burst_data_valid      ),
+       .wr_burst_data_req         (wr_burst_data_req        ),
+       .rd_burst_data             (rd_burst_data            ),
+       .wr_burst_data             (wr_burst_data            ),
+       .rd_burst_finish           (rd_burst_finish          ),
+       .wr_burst_finish           (wr_burst_finish          )
+       );
+
+    sdram_core sdram_core_m0
+      (
+       .rst                        (reset                    ),
+       .clk                        (clk_sdram90p             ),
+       .rd_burst_req               (rd_burst_req             ),
+       .rd_burst_len               (rd_burst_len             ),
+       .rd_burst_addr              (rd_burst_addr            ),
+       .rd_burst_data_valid        (rd_burst_data_valid      ),
+       .rd_burst_data              (rd_burst_data            ),
+       .rd_burst_finish            (rd_burst_finish          ),
+       .wr_burst_req               (wr_burst_req             ),
+       .wr_burst_len               (wr_burst_len             ),
+       .wr_burst_addr              (wr_burst_addr            ),
+       .wr_burst_data_req          (wr_burst_data_req        ),
+       .wr_burst_data              (wr_burst_data            ),
+       .wr_burst_finish            (wr_burst_finish          ),
+       .sdram_cke                  (sdram_cke                ),
+       .sdram_cs_n                 (sdram_cs_n               ),
+       .sdram_ras_n                (sdram_ras_n              ),
+       .sdram_cas_n                (sdram_cas_n              ),
+       .sdram_we_n                 (sdram_we_n               ),
+       .sdram_dqm                  (sdram_dqm                ),
+       .sdram_ba                   (sdram_ba                 ),
+       .sdram_addr                 (sdram_addr               ),
+       .sdram_dq                   (sdram_dq                 )
+       );
 
     mc6847 vdg(
                .clk        (clk_vdg),
@@ -319,6 +432,17 @@ module top (
         .i2s_lrclk(i2s_lrck),
         .i2s_sdata(i2s_din));
 
+reg [9:0] sdram_init = 10'd1000;
+
+    // Wait 200us for SDRAM to be ready.
+    always @(posedge clk_cpu) begin
+        if (sdram_init == 10'd0) begin
+            sdram_ready <= 1;
+        end else begin
+            sdram_init <= sdram_init - 10'd1;
+        end
+    end
+
     // Clock enable VDG when CVBS out is enabled.
     always @(posedge clk_vdg)
     begin
@@ -379,6 +503,8 @@ module top (
     assign cpu_rd = ~cpu_rd_n;
     assign mem_en = ~mem_en_n;
     assign mem_rd = mem_en && cpu_rd;
+    assign ram_rd = iplk ? mem_rd : 1'b0;
+    assign rom_en = ~ram_rd;
     assign mem_wr = mem_en && cpu_wr;
     assign io_en = ~io_en_n;
     assign io_rd = io_en && cpu_rd;
@@ -397,7 +523,9 @@ module top (
 
     assign ram_din = mem_wr ? cpu_data : 8'bz;
     assign ram_addr = mem_en ? cpu_addr : 16'bz;
-    assign cpu_data_in = mem_rd ? ram_byte :
+    assign rom_addr = mem_en ? cpu_addr[14:0] : 15'bz;
+    assign mem_byte = iplk ? ram_byte : rom_byte;
+    assign cpu_data_in = mem_rd ? mem_byte :
            io_rd ? io_byte : 8'bz;
     assign cpu_data = cpu_rd ? cpu_data_in : 8'bz;
 
@@ -450,7 +578,7 @@ module top (
     assign char_row = char_a[3:0];
 
     // VDG ROM stores only 8 (not 12) bytes per each char pattern data (thus 'packed_')
-    // since 3 and the last 1 row are always zero.
+    // The first 3 and the last 1 row are always zero, thus can be skipped.
     assign packed_char_a[2:0] = char_row - 2'b11;
     assign int_char_d = (char_row < 3 || char_row > 10 || is_ctrl) ? 8'h00 : packed_char_d;
     assign char_d = mc_ext ? vg_data_cg : int_char_d;
