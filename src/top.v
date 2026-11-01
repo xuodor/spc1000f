@@ -206,20 +206,23 @@ module top (
                .LOCKED(pll_locked)
            );
 
-    // ODDR2 Clock Forwarding Instance
+    // Implement Clock Forwarding. Spartan-6 FPGAs do not allow a global clock
+    // buffer (BUFG) to drive an output pin directly because global clock
+    // networks cannot route straight to external I/O pins without causing
+    // severe routing delays, skew, or unroutable errors.
     ODDR2 #(
-        .DDR_ALIGNMENT("NONE"), // Sets output alignment to "NONE", "C0" or "C1"
-        .INIT(1'b0),            // Sets initial state of the Q output to 1'b0 or 1'b1
-        .SRTYPE("SYNC")         // Specifies "SYNC" or "ASYNC" set/reset
+        .DDR_ALIGNMENT("NONE"),
+        .INIT(1'b0),
+        .SRTYPE("SYNC")
     ) sdram_clk_forward_inst (
-        .Q(sdram_clk),     // Output clock net connected directly to your top-level port
-        .C0(clk_100),   // Your internal clock net (output from clkout4_buf)
-        .C1(~clk_100),  // Inverted internal clock net using local inversion
-        .CE(1'b1),              // Clock enable tied high
-        .D0(1'b1),              // Data 0 tied to Logic 1
-        .D1(1'b0),              // Data 1 tied to Logic 0
-        .R(1'b0),               // Reset tied low
-        .S(1'b0)                // Set tied low
+        .Q(sdram_clk),
+        .C0(clk_100),
+        .C1(~clk_100),
+        .CE(1'b1),
+        .D0(1'b1),
+        .D1(1'b0),
+        .R(1'b0),
+        .S(1'b0)
     );
     z80_top_direct_n cpu(
                          .nMREQ(mem_en_n),

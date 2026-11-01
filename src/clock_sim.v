@@ -116,3 +116,23 @@ module clocks (
     end
 
 endmodule
+
+module ODDR2
+    #(
+        parameter DDR_ALIGNMENT = "NONE",
+        parameter INIT = 1'b0,
+        parameter SRTYPE = "SYNC"
+    )
+    (
+        output wire Q,
+        input wire C0,
+        input wire C1,
+        input wire CE,
+        input wire D0,
+        input wire D1,
+        input wire R,
+        input wire S
+    );
+
+    assign Q = C0;
+endmodule
