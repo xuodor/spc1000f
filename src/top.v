@@ -20,6 +20,7 @@ module top (
         output wire       i2s_bck,
         output wire       i2s_lrck,
         output wire       i2s_din,
+        output wire       i2s_sck,
 
         output                       sdram_clk,
         output                       sdram_cke,
@@ -436,7 +437,8 @@ module top (
         .din(ay_sout),
         .i2s_bclk(i2s_bck),
         .i2s_lrclk(i2s_lrck),
-        .i2s_sdata(i2s_din));
+        .i2s_sdata(i2s_din),
+        .i2s_sck(i2s_sck));
 
 reg [9:0] sdram_init = 10'd1000;
 
@@ -626,7 +628,8 @@ module i2s(
 	   input wire [9:0] din,
 	   output wire	    i2s_bclk,
 	   output wire	    i2s_lrclk,
-	   output wire	    i2s_sdata);
+	   output wire	    i2s_sdata,
+           output wire      i2s_sck);
 
     // Expand 10 to 16 bit
     wire [15:0] payload = { (din - 10'b1000000000), 6'h00 };
@@ -677,5 +680,5 @@ module i2s(
     end
 
     assign i2s_sdata = sdata_out;
-
+    assign i2s_sck = 1'b0;
 endmodule

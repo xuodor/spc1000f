@@ -46,6 +46,7 @@ NET "scan_sig<0>"            LOC = D8 | IOSTANDARD = LVCMOS33;  ##
 NET i2s_lrck                                   LOC = H15 | IOSTANDARD = "LVCMOS33";
 NET i2s_din                                    LOC = F16 | IOSTANDARD = "LVCMOS33";
 NET i2s_bck                                    LOC = E16 | IOSTANDARD = "LVCMOS33";
+NET i2s_sck                                    LOC = C10 | IOSTANDARD = LVCMOS33 | DRIVE = 12 | SLEW = SLOW | PULLDOWN;
 
 NET sdram_clk                     LOC =  H4 | IOSTANDARD = "LVCMOS33";        ## SDRAM CLOCK
 NET sdram_cke                     LOC =  H2 | IOSTANDARD = "LVCMOS33";        ## SDRAM CKE
