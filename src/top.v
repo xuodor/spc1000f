@@ -571,10 +571,10 @@ reg [9:0] sdram_init = 10'd1000;
     assign ps = gmode[4:3];
 
     // Attribute from AG
-    assign mc_inv = attr[0];
-    assign mc_css = attr[1];
-    assign mc_as = attr[2];
-    assign mc_ext = attr[3];
+    assign mc_inv = mc_ag ? 1'b0 : attr[0];
+    assign mc_css = mc_ag ? 1'b0 : attr[1];
+    assign mc_as = mc_ag ? 1'b0 : attr[2];
+    assign mc_ext = mc_ag ? 1'b0 : attr[3];
 
     // VDG signals for fetching char pattern data from VRAM CG. Data for 80 ~ DFH
     // precedes 60 ~ 7FH. Add an offset 600H for the latter.

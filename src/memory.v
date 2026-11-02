@@ -47,7 +47,7 @@ module vram (
         dout_a <= ram[addr_a];
      end
 
-   always @(posedge clk_a)
+   always @(posedge clk_b)
      begin
          dout_b <= ram[addr_b];
      end
